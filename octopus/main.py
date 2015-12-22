@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2014 Bitergia
+# Copyright (C) 2014-2015 Bitergia
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,21 +22,52 @@
 
 from argparse import ArgumentParser
 
+from octopus.backends.docker import DockerRegistry
+from octopus.backends.github import GitHubPlatform
 from octopus.backends.puppet import PuppetForge
+from octopus.backends.gerrit import Gerrit
 from octopus.database import Database
-from octopus.model import Platform, User, Project, Release
+
+
+def main():
+    args = parse_args()
+
+    db = Database(args.db_user, args.db_password, args.db_name)
+    session = db.connect()
+
+    if args.backend == 'docker':
+        backend = DockerRegistry(session, args.url, args.owner)
+    elif args.backend == 'puppet':
+        backend = PuppetForge(session, args.url)
+    elif args.backend == 'github':
+        backend = GitHubPlatform(session, owner=args.owner, repository=args.repository,
+                                 url=args.gh_url, user=args.gh_user, password=args.gh_password,
+                                 oauth_token=args.gh_token)
+    elif args.backend == 'gerrit':
+        backend = Gerrit(session, gerrit_user=args.gerrit_user, gerrit_url=args.gerrit_url)
+    else:
+        print('Backend %s not found' % args.backend)
+        return
+
+    if hasattr(args, 'export'):
+        # This write in stdout info linked to the selected backend
+        backend.export()
+    else:
+        print('Fetching...')
+        if args.backend == 'gerrit':
+            # Restart the database
+            db.clear()
+        platform = backend.fetch()
+        print('Fetch processes completed')
+
+        store(db, session, platform)
+        print('Storage processes completed')
+
+    session.close()
 
 
 def parse_args():
-    parser = ArgumentParser(usage="Usage: '%(prog)s [options] URL")
-
-    # Positional arguments
-    parser.add_argument('url', help='URL used to fetch info about projects')
-
-    # Required arguments
-    parser.add_argument('-b', '--backend', dest='backend',
-                        help='Backend used to fetch projects info', required=True,
-                        choices=['puppet'])
+    parser = ArgumentParser()
 
     # Database options
     group = parser.add_argument_group('Database options')
@@ -60,106 +91,23 @@ def parse_args():
                        action='store_true', dest='debug',
                        default=False)
 
+    # Add specific backend subparsers
+    subparsers = parser.add_subparsers(dest='backend',
+                                       help='Backend help')
+
+    DockerRegistry.set_arguments_subparser(subparsers)
+    GitHubPlatform.set_arguments_subparser(subparsers)
+    PuppetForge.set_arguments_subparser(subparsers)
+    Gerrit.set_arguments_subparser(subparsers)
+
     # Parse arguments
     args = parser.parse_args()
 
     return args
 
 
-def fetch_and_store(url, platform_type, session, debug=False):
-    if platform_type != 'puppet':
-        return
-
-    np = 0
-    tp = 0
-    nr = 0
-    tr = 0
-
-    platform = session.query(Platform).\
-        filter(Platform.url == url).first()
-
-    if not platform:
-        platform = Platform()
-        platform.type = 'puppet'
-        platform.url = url
-        session.add(platform)
-
-        if debug:
-            print('Platform %s added' % platform)
-    elif debug:
-        print('Platform %s already stored' % platform)
-
-    # Create the object to retrieve the projects
-    forge = PuppetForge(url)
-
-    print('Fetching projects from %s' % url)
-
-    # Fetch projects and releases from the forge
-    for project in forge.projects():
-        user = project.users.pop(0)
-
-        stored_user = session.query(User).\
-            filter(User.username == user.username).first()
-
-        if not stored_user:
-            session.add(user)
-            stored_user = user
-
-        for release in forge.releases(project.name, stored_user.username):
-            release.project = project
-            project.releases.append(release)
-
-        if debug:
-            print('Project %s fetched' % project.name)
-
-        stored_project = session.query(Project).\
-            filter(Project.url == project.url).first()
-
-        tp += 1
-
-        if not stored_project:
-            project.platform_id = platform.id
-            session.add(project)
-
-            np += 1
-            nr += len(project.releases)
-            tr += len(project.releases)
-
-            if debug:
-                print('Project %s and related releases inserted' % project)
-        else:
-            if debug:
-                print('Project %s already stored' % project)
-
-            for release in project.releases:
-                tr += 1
-
-                stored_release = session.query(Release).\
-                    filter(Release.name == release.name,
-                           Release.version == release.version,
-                           Release.project == stored_project)
-
-                if not stored_release:
-                    user.releases.appen(release)
-                    release.project_id = stored_project.id
-                    session.add(release)
-
-                    nr += 1
-
-                    if debug:
-                        print('Release %s inserted' % release)
-                elif debug:
-                    print('Release %s already stored' % release)
-
-    print('Fetch and storage processes completed')
-    print('Total %d/%d of new projects inserted' % (np, tp))
-    print('Total %d/%d of new releases inserted' % (nr, tr))
-
-
-def main():
-    args = parse_args()
-
-    db = Database(args.db_user, args.db_password, args.db_name)
-
-    with db.connect() as session:
-        fetch_and_store(args.url, args.backend, session, args.debug)
+def store(db, session, platform):
+    try:
+        db.store(session, platform)
+    except Exception, e:
+        raise RuntimeError(str(e))

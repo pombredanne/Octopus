@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2014 Bitergia
+# Copyright (C) 2014-2015 Bitergia
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -29,7 +29,24 @@ from sqlalchemy.ext.declarative import declarative_base
 ModelBase = declarative_base()
 
 
-class Platform(ModelBase):
+class UniqueObject(object):
+
+    @classmethod
+    def unique_filter(cls, query, *arg, **kw):
+        raise NotImplementedError
+
+    @classmethod
+    def as_unique(cls, session, *arg, **kw):
+        return _unique(
+                    session,
+                    cls,
+                    cls.unique_filter,
+                    cls,
+                    arg, kw
+               )
+
+
+class Platform(UniqueObject, ModelBase):
     __tablename__ = 'platforms'
 
     id = Column(Integer, primary_key=True)
@@ -37,6 +54,7 @@ class Platform(ModelBase):
     type = Column(String(32))
 
     projects = relationship("Project", backref='platforms')
+    gerrit_repositories = relationship("GerritRepository", backref='gerrit_repositories')
 
     __table_args__ = (UniqueConstraint('url', name='_url_unique'),
                       {'mysql_charset': 'utf8'})
@@ -45,6 +63,10 @@ class Platform(ModelBase):
     def __repr__(self):
         return self.url
 
+    @classmethod
+    def unique_filter(cls, query, url):
+        return query.filter(Platform.url == url)
+
 
 projects_users_table = Table('projects_users', ModelBase.metadata,
     Column('project_id', Integer, ForeignKey('projects.id')),
@@ -52,11 +74,29 @@ projects_users_table = Table('projects_users', ModelBase.metadata,
 )
 
 
-class Project(ModelBase):
+class GerritRepository(UniqueObject, ModelBase):
+    __tablename__ = 'gerrit_repositories'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128))
+    platform_id = Column(Integer, ForeignKey('platforms.id'))
+
+    # one to one repository-platform relationship
+    platform = relationship("Platform", backref='repository_platform')
+
+    @classmethod
+    def unique_filter(cls, query, url):
+        return query.filter(Repository.url == url)
+
+    def __repr__(self):
+        return self.url
+
+
+class Project(UniqueObject, ModelBase):
     __tablename__ = 'projects'
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(32))
+    name = Column(String(64))
     url = Column(String(128))
     created_on = Column(DateTime())
     updated_on = Column(DateTime())
@@ -68,17 +108,74 @@ class Project(ModelBase):
     # many to many projects-users relationship
     users = relationship("User", secondary=projects_users_table)
 
+    # one to many projects-repositories relationship
+    repositories = relationship("Repository", backref='project_repositories')
+
     # one to many projects-releases relationship
     releases = relationship("Release", backref='project_releases')
 
     __table_args__ = (UniqueConstraint('url', 'platform_id', name='_project_unique'),
                       {'mysql_charset': 'utf8'})
 
+    @classmethod
+    def unique_filter(cls, query, url, platform):
+        return query.filter(Project.url == url,
+                            Project.platform == platform)
+
     def __repr__(self):
         return self.name
 
 
-class User(ModelBase):
+class Repository(UniqueObject, ModelBase):
+    __tablename__ = 'repositories'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64))
+    url = Column(String(128))
+    clone_url = Column(String(128))
+    type = Column(String(32))
+    starred = Column(Integer)
+    pulls = Column(Integer)
+    downloads = Column(Integer)
+    forks = Column(Integer)
+    watchers = Column(Integer)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+
+    # one to one project-platform relationship
+    project = relationship("Project", backref='repo_project')
+
+    # one to many repository - log relationship
+    log = relationship("RepositoryLog", backref='repository_log')
+
+    __table_args__ = (UniqueConstraint('url', name='_repo_unique'),
+                      {'mysql_charset': 'utf8'})
+
+    @classmethod
+    def unique_filter(cls, query, url):
+        return query.filter(Repository.url == url)
+
+    def __repr__(self):
+        return self.url
+
+
+class RepositoryLog(ModelBase):
+    __tablename__ = 'repositories_log'
+
+    id = Column(Integer, primary_key=True)
+    repo_id = Column(Integer, ForeignKey('repositories.id'))
+    date = Column(DateTime())
+    starred = Column(Integer)
+    pulls = Column(Integer)
+    downloads = Column(Integer)
+    forks = Column(Integer)
+    watchers = Column(Integer)
+
+    repository = relationship("Repository", backref='repo_log')
+
+    __table_args__ = ({'mysql_charset': 'utf8'})
+
+
+class User(UniqueObject, ModelBase):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
@@ -90,15 +187,19 @@ class User(ModelBase):
     __table_args__ = (UniqueConstraint('username', name='_username_unique'),
                       {'mysql_charset': 'utf8'})
 
+    @classmethod
+    def unique_filter(cls, query, username):
+        return query.filter(User.username == username)
+
     def __repr__(self):
         return self.username
 
 
-class Release(ModelBase):
+class Release(UniqueObject, ModelBase):
     __tablename__ = 'releases'
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(32))
+    name = Column(String(64))
     version = Column(String(32))
     url = Column(String(128))
     file_url = Column(String(128))
@@ -113,8 +214,26 @@ class Release(ModelBase):
     # one to one release-project relationship
     project = relationship("Project", backref='release_project')
 
-    __table_args__ = (UniqueConstraint('name', 'version', 'project_id', name='_release_unique'),
+    __table_args__ = (UniqueConstraint('url', name='_release_unique'),
                       {'mysql_charset': 'utf8'})
+
+    @classmethod
+    def unique_filter(cls, query, url):
+        return query.filter(Release.url == url)
 
     def __repr__(self):
         return "%s (%s)" % (self.name, self.version)
+
+
+def _unique(session, cls, queryfunc, constructor, arg, kw):
+    with session.no_autoflush:
+        q = session.query(cls)
+        q = queryfunc(q, *arg, **kw)
+
+        obj = q.first()
+
+        if not obj:
+            obj = constructor(*arg, **kw)
+
+        session.add(obj)
+    return obj

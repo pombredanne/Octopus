@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2014 Bitergia
+# Copyright (C) 2014-2015 Bitergia
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,8 +19,6 @@
 # Authors:
 #         Santiago Dueñas <sduenas@bitergia.com>
 #
-
-from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import URL
@@ -43,18 +41,16 @@ class Database(object):
         # It won't replace any existing schema
         ModelBase.metadata.create_all(self._engine)
 
-    @contextmanager
     def connect(self):
-        session = self._Session()
+        return self._Session()
 
+    def store(self, session, obj):
         try:
-            yield session
+            session.add(obj)
             session.commit()
         except:
             session.rollback()
             raise
-        finally:
-            session.close()
 
     def clear(self):
         session = self._Session()

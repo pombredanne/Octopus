@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2014 Bitergia
+# Copyright (C) 2014-2015 Bitergia
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,6 +31,8 @@ class Backend(object):
     def name(self):
         return self._name
 
+    def export(self):
+        raise NotImplementedError
 
 class ProjectsIterator(object):
     """Abstract projects iterator"""

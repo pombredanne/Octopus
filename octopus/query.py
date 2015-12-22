@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2014-2015 Bitergia
@@ -18,17 +17,17 @@
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #
 # Authors:
-#     Santiago Dueñas <sduenas@bitergia.com>
+#         Daniel Izquierdo <dizquierdo@bitergia.com>
 #
 
-from distutils.core import setup
+from sqlalchemy import select
 
+class Query(object):
+    """Use to query database and export data"""
 
-setup(name="octopus",
-      version="0.0.1",
-      author="Bitergia",
-      author_email="metrics-grimoire@lists.libresoft.es",
-      url="https://github.com/MetricsGrimoire/Octopus",
-      packages=['octopus', 'octopus.backends',],
-      scripts=["bin/octopus"])
+    def __init__(self, session, alchemy_object):
+        self.session = session
+        self.alchemy_object = alchemy_object
 
+    def data(self):
+        return self.session.execute(select([self.alchemy_object]))

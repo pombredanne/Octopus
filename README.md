@@ -22,6 +22,8 @@ Licensed under GNU General Public License (GPL), version 3 or later
 * MySQL >= 5.5
 * SQLAlchemy >= 0.8.2
 * Python requests >= 1.2.3
+* github3.py >= 1.0.0a1
+* BeautifulSoup >= 4.0
 
 ## Installation
 
@@ -36,7 +38,12 @@ First, create database as follows:
     # CREATE DATABASE <databasename> CHARACTER SET utf8 COLLATE utf8_unicode_ci;
 
 Run Octopus as follows:
-    # $ octopus -b puppet -u <dbuser> -p <dbpassword> -d <databasename> https://forgeapi.puppetlabs.com
+    # $ octopus -u <dbuser> -p <dbpassword> -d <dbname> puppet https://forgeapi.puppetlabs.com
+    # $ octopus -u <dbuser> -p <dbpassword> -d <dbname> github --gh-token XXXXX <owner> [<repository>]
+    # $ octopus -u <dbuser> -p <dbpassword> -d <dbname> docker https://registry.hub.docker.com <owner>
+    # $ octopus -u <dbuser> -p <dbpassword> -d <dbname> gerrit --gerrit-user <gerrituser> --gerrit-url <gerriturl>
+
+To export data user the '--export' option in each backend.
 
 ## Contact
 
